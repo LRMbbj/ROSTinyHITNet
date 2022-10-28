@@ -14,7 +14,12 @@ class LoadStreams:
     def update(self, limg, rimg):
         self.limg = limg
         self.rimg = rimg
-        time.sleep(0.0)  # wait time
+
+    def updateSplit(self, img, tag):
+        if tag == 'l':
+            self.limg = img
+        if tag == 'r':
+            self.rimg = img
 
     def Stop(self):
         self.enable = False

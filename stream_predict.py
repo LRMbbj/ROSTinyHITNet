@@ -11,11 +11,12 @@ import numpy as np
 import pytorch_lightning as pl
 from models import build_model
 from matplotlib import pyplot as plt
-import visdom
+# import visdom
 import rospy
+from sensor_msgs.msg import Image
 
 
-vis = visdom.Visdom()
+# vis = visdom.Visdom()
 
 
 class PredictModel(pl.LightningModule):
@@ -54,7 +55,7 @@ class Predict():
             disp = torch.clip(disp / 192 * 255, 0, 255).long()
             # disp[disp == 255] = 0
 
-            vis.histogram(disp.flatten(), win="Hist", opts={"numbins": 25})
+            # vis.histogram(disp.flatten(), win="Hist", opts={"numbins": 25})
 
             disp = disp.cpu().numpy()[0][0]
             disp = np.sqrt(disp / 255) * 255
@@ -62,6 +63,25 @@ class Predict():
             disp = cv2.applyColorMap(disp, cv2.COLORMAP_TURBO)
 
             cv2.imshow("Disp", disp)
+
+            key = cv2.waitKey(1)
+            if key == ord("x"):
+                break
+
+            time.sleep(1 / 30)  # 按原帧率播放
+
+        print("Video End..")
+        self.dataloader.Stop()
+        cv2.destroyAllWindows()
+
+    def ShowVideo(self):
+        print("Going to play..")
+        cv2.namedWindow("Video", cv2.WINDOW_KEEPRATIO)
+        cv2.namedWindow("Disp", cv2.WINDOW_KEEPRATIO)
+
+        for limg, rimg in self.dataloader:
+            img = np.concatenate((limg, rimg), axis=1)
+            cv2.imshow("Video", img)
 
             key = cv2.waitKey(1)
             if key == ord("x"):
@@ -82,8 +102,8 @@ class LoadVideo(Thread):
 
     def run(self):
         print("stream predict running..")
-        lcap = cv2.VideoCapture(cam_path["left"])
-        rcap = cv2.VideoCapture(cam_path["right"])
+        lcap = cv2.VideoCapture(self.cam_path["left"])
+        rcap = cv2.VideoCapture(self.cam_path["right"])
 
         fps = lcap.get(cv2.CAP_PROP_FPS)  # 视频平均帧率
         print("fps: {}".format(fps))
@@ -107,13 +127,18 @@ class LoadVideo(Thread):
 
 
 class LoadVideoRos():
-    def __init__(self, cam_path, dataloader):
+    def __init__(self, dataloader):
         super().__init__()
-        self.cam_path = cam_path
         self.dataloader = dataloader
 
-    def callback(self):
-        pass
+    def callback(self, msg, tag):
+        self.dataloader.updateSplit(msg, tag)
+
+    def callbackLeft(self, msg):
+        self.callback(msg, 'l')
+
+    def callbackRight(self, msg):
+        self.callback(msg, 'r')
 
 
 class Args:
@@ -121,7 +146,7 @@ class Args:
         self.model = "HITNetXL_SF"
 
 
-if __name__ == "__main__":
+if __name__ == "xx":
     cam_path = {"left": "./data/video/typhoon_h480_0_leftcam.avi",
                 "right": "./data/video/typhoon_h480_0_rightcam.avi"}
 
@@ -146,3 +171,19 @@ if __name__ == "__main__":
     thread_pred.run()
 
     print("All Thread Finished..")
+
+if __name__ == "__main__":
+    dataloader = LoadStreams()
+    loader = LoadVideoRos(dataloader)
+
+    cam_topic = {"left": "/typhoon_h480_0/stereo_camera/left/image_raw/image_topics",
+                 "right": "/typhoon_h480_0/stereo_camera/right/image_raw/image_topics"}
+
+    rospy.init_node('Stereo_Matcher', anonymous=True)
+    rospy.Subscriber(
+        cam_topic["left"], Image, loader.callbackLeft)
+    rospy.Subscriber(
+        cam_topic["right"], Image, loader.callbackRight)
+
+    pred = Predict(loader, None)
+    pred.ShowVideo()
