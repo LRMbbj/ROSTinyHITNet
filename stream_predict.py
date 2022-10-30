@@ -131,14 +131,14 @@ class LoadVideoRos():
         super().__init__()
         self.dataloader = dataloader
 
-    def callback(self, msg, tag):
-        self.dataloader.updateSplit(msg, tag)
+    def callbackGenerator(self, index, tag):
+        def callback(img):
+            self.dataloader.updateSplit(np.array(img), index, tag)
+        return callback
 
-    def callbackLeft(self, msg):
-        self.callback(msg, 'l')
 
-    def callbackRight(self, msg):
-        self.callback(msg, 'r')
+def GetTopic(index, cam_pos):
+    return "/typhoon_h480_{}/stereo_camera/{}/image_raw/image_topics".format(index, cam_pos)
 
 
 class Args:
@@ -176,14 +176,11 @@ if __name__ == "__main__":
     dataloader = LoadStreams()
     loader = LoadVideoRos(dataloader)
 
-    cam_topic = {"left": "/typhoon_h480_0/stereo_camera/left/image_raw/image_topics",
-                 "right": "/typhoon_h480_0/stereo_camera/right/image_raw/image_topics"}
-
     rospy.init_node('Stereo_Matcher', anonymous=True)
-    rospy.Subscriber(
-        cam_topic["left"], Image, loader.callbackLeft)
-    rospy.Subscriber(
-        cam_topic["right"], Image, loader.callbackRight)
+    for i in range(6):
+        for d in ("left", 'right'):
+            rospy.Subscriber(
+                GetTopic(i, d), Image, loader.callbackGenerator(i, d))
 
     pred = Predict(loader, None)
     pred.ShowVideo()
