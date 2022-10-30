@@ -5,7 +5,7 @@ from turtle import update
 from typing_extensions import Self
 import cv2
 import torch
-from Dataloader import LoadStreams
+from Dataloader import StreamLoader
 from dataset.utils import np2torch
 import numpy as np
 import pytorch_lightning as pl
@@ -150,7 +150,7 @@ if __name__ == "xx":
     cam_path = {"left": "./data/video/typhoon_h480_0_leftcam.avi",
                 "right": "./data/video/typhoon_h480_0_rightcam.avi"}
 
-    dataloader = LoadStreams()
+    dataloader = StreamLoader()
 
     args = Args()
 
@@ -173,7 +173,7 @@ if __name__ == "xx":
     print("All Thread Finished..")
 
 if __name__ == "__main__":
-    dataloader = LoadStreams()
+    dataloader = StreamLoader()
     loader = LoadVideoRos(dataloader)
 
     rospy.init_node('Stereo_Matcher', anonymous=True)

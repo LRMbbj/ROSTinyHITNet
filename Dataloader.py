@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 
 
-class LoadStreams:
+class StreamLoader:
     def __init__(self):
         print("Loader Created...")
         self.imgs = [np.array([[]]*6), np.array([[]]*6)]

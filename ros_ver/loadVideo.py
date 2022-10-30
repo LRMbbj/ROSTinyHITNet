@@ -3,7 +3,7 @@ import cv2
 
 
 global dataloader
-dataloader = Dataloader.LoadStreams()
+dataloader = Dataloader.StreamLoader()
 
 
 def load_video(cam_path):
