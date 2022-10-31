@@ -43,12 +43,12 @@ class Predict():
         cv2.namedWindow("Video", cv2.WINDOW_KEEPRATIO)
         cv2.namedWindow("Disp", cv2.WINDOW_KEEPRATIO)
 
-        for limg, rimg in self.dataloader:
-            img = np.concatenate((limg, rimg), axis=1)
+        for limgs, rimgs in self.dataloader:
+            img = np.concatenate((limgs, rimgs), axis=1)
             cv2.imshow("Video", img)
 
-            left = np2torch(limg, bgr=True).cuda().unsqueeze(0)
-            right = np2torch(rimg, bgr=True).cuda().unsqueeze(0)
+            left = np2torch(limgs, bgr=True).cuda().unsqueeze(0)
+            right = np2torch(rimgs, bgr=True).cuda().unsqueeze(0)
             pred = self.model(left, right)
 
             disp = pred["disp"]
@@ -79,8 +79,11 @@ class Predict():
         cv2.namedWindow("Video", cv2.WINDOW_KEEPRATIO)
         cv2.namedWindow("Disp", cv2.WINDOW_KEEPRATIO)
 
-        for limg, rimg in self.dataloader:
-            img = np.concatenate((limg, rimg), axis=1)
+        for limgs, rimgs in self.dataloader:
+            
+            img = np.concatenate((limgs[0], rimgs[0]), axis=1)
+            for k in range(1, 6):
+                img = np.concatenate((img, np.concatenate((limgs[k], rimgs[k]), axis=1)), axis=0)
             cv2.imshow("Video", img)
 
             key = cv2.waitKey(1)
@@ -133,12 +136,12 @@ class LoadVideoRos():
 
     def callbackGenerator(self, index, tag):
         def callback(img):
-            self.dataloader.updateSplit(np.array(img), index, tag)
+            self.dataloader.updateSplit(np.frombuffer(img.data, dtype=np.uint8).reshape((img.height, img.width, 3)), index, tag)
         return callback
 
 
 def GetTopic(index, cam_pos):
-    return "/typhoon_h480_{}/stereo_camera/{}/image_raw/image_topics".format(index, cam_pos)
+    return "/typhoon_h480_{}/stereo_camera/{}/image_raw".format(index, cam_pos)
 
 
 class Args:
@@ -181,6 +184,6 @@ if __name__ == "__main__":
         for d in ("left", 'right'):
             rospy.Subscriber(
                 GetTopic(i, d), Image, loader.callbackGenerator(i, d))
-
-    pred = Predict(loader, None)
+    time.sleep(1)
+    pred = Predict(dataloader, None)
     pred.ShowVideo()
