@@ -31,6 +31,15 @@ class PredictModel(pl.LightningModule):
         return self.model(left, right)
 
 
+def fixdim(x):
+    x = x[..., [2, 1, 0]]
+    x = np.transpose(x, (0, 3, 1, 2))
+    if x.dtype == np.uint8:
+        x = x.astype(np.float32) / 255
+    x = torch.from_numpy(x.copy())
+    return x
+
+
 class Predict():
     def __init__(self, dataloader, model):
         # Thread.__init__(self)
@@ -40,15 +49,15 @@ class Predict():
     @torch.no_grad()
     def run(self) -> None:
         print("Going to play..")
-        cv2.namedWindow("Video", cv2.WINDOW_KEEPRATIO)
-        cv2.namedWindow("Disp", cv2.WINDOW_KEEPRATIO)
+        # cv2.namedWindow("Video", cv2.WINDOW_KEEPRATIO)
+        # cv2.namedWindow("Disp", cv2.WINDOW_KEEPRATIO)
 
         for limgs, rimgs in self.dataloader:
             img = np.concatenate((limgs, rimgs), axis=1)
-            cv2.imshow("Video", img)
+            # cv2.imshow("Video", img)
 
-            left = np2torch(limgs, bgr=True).cuda().unsqueeze(0)
-            right = np2torch(rimgs, bgr=True).cuda().unsqueeze(0)
+            left = fixdim(limgs).cuda()
+            right = fixdim(rimgs).cuda()
             pred = self.model(left, right)
 
             disp = pred["disp"]
@@ -62,11 +71,11 @@ class Predict():
             disp = disp.astype(np.uint8)
             disp = cv2.applyColorMap(disp, cv2.COLORMAP_TURBO)
 
-            cv2.imshow("Disp", disp)
+            # cv2.imshow("Disp", disp)
 
-            key = cv2.waitKey(1)
-            if key == ord("x"):
-                break
+            # key = cv2.waitKey(1)
+            # if key == ord("x"):
+                # break
 
             time.sleep(1 / 30)  # 按原帧率播放
 
@@ -178,6 +187,16 @@ if __name__ == "xx":
 if __name__ == "__main__":
     dataloader = StreamLoader()
     loader = LoadVideoRos(dataloader)
+    
+    args = Args()
+
+    model = PredictModel(args).eval()
+    ckpt = torch.load("ckpt/hitnet_xl_sf_finalpass_from_tf.ckpt")
+    if "state_dict" in ckpt:
+        model.load_state_dict(ckpt["state_dict"])
+    else:
+        model.model.load_state_dict(ckpt)
+    model.cuda()
 
     rospy.init_node('Stereo_Matcher', anonymous=True)
     for i in range(6):
@@ -185,5 +204,5 @@ if __name__ == "__main__":
             rospy.Subscriber(
                 GetTopic(i, d), Image, loader.callbackGenerator(i, d))
     time.sleep(1)
-    pred = Predict(dataloader, None)
-    pred.ShowVideo()
+    pred = Predict(dataloader, model)
+    pred.run()
