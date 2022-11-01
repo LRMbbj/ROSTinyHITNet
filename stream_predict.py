@@ -31,44 +31,92 @@ class PredictModel(pl.LightningModule):
         return self.model(left, right)
 
 
+def fixdim(x):
+    x = x[..., [2, 1, 0]]
+    x = np.transpose(x, (0, 3, 1, 2))
+    if x.dtype == np.uint8:
+        x = x.astype(np.float32) / 255
+    x = torch.from_numpy(x.copy())
+    return x
+
+
 class Predict():
     def __init__(self, dataloader, model):
         # Thread.__init__(self)
         self.dataloader = dataloader
         self.model = model
+        self.xscale = 6
+        self.yscale = 6
 
     @torch.no_grad()
     def run(self) -> None:
         print("Going to play..")
         cv2.namedWindow("Video", cv2.WINDOW_KEEPRATIO)
-        cv2.namedWindow("Disp", cv2.WINDOW_KEEPRATIO)
+        
 
-        for limg, rimg in self.dataloader:
-            img = np.concatenate((limg, rimg), axis=1)
+        for limgs, rimgs in self.dataloader:
+            img = np.concatenate((limgs[0], rimgs[0]), axis=1)
+            limg = limgs[0]
+            rimg = rimgs[0]
+            for k in range(1, 6):
+                img = np.concatenate((img, np.concatenate((limgs[k], rimgs[k]), axis=1)), axis=0)
+                limg = np.concatenate((limg, limgs[k]), axis=0)
+                rimg = np.concatenate((rimg, rimgs[k]), axis=0)
+
+            disps = None
+            t0 = time.time()
+            
+            # leftlist = fixdim(limgs).cuda()
+            # rightlist = fixdim(rimgs).cuda()
+            
+            limg = cv2.resize(limg, None, fx=1/self.xscale, fy=1/self.yscale, interpolation=cv2.INTER_AREA)
+            rimg = cv2.resize(rimg, None, fx=1/self.xscale, fy=1/self.yscale, interpolation=cv2.INTER_AREA)
+            
+            for k in range(1):
+            
+                left = np2torch(limg, bgr=True).cuda().unsqueeze(0)
+                right = np2torch(rimg, bgr=True).cuda().unsqueeze(0)
+                # left = leftlist[k:k+3]
+                # right = rightlist[k:k+3]
+                
+                
+                # torch.cuda.synchronize()
+                t1 = time.time()
+                
+                pred = self.model(left, right)
+                
+                
+                # torch.cuda.synchronize()
+                print("[index:{}] eql fps:{}".format(k, 1./(time.time() - t1)))
+                disp = pred["disp"]
+                disp = torch.clip(disp / 192 * 255, 0, 255).long()
+                # disp[disp == 255] = 0
+
+                # vis.histogram(disp.flatten(), win="Hist", opts={"numbins": 25})
+                
+                disp = disp.cpu().numpy()[0][0]
+                disp = np.sqrt(disp / 255) * 255
+                disp = disp.astype(np.uint8)
+                
+                if disps is None:
+                    disps = disp
+                else:
+                    disps = np.concatenate((disps, disp), axis=1)
+                    
+            print("[total] eql fps:{}".format(1./(time.time() - t0)))
+
+            disps = cv2.applyColorMap(disps, cv2.COLORMAP_TURBO)
+            disps = cv2.resize(disps, None, fy=self.yscale, fx=self.xscale, interpolation=cv2.INTER_LINEAR)
+            
+            img = np.concatenate((img, disps), axis=1)
+            
             cv2.imshow("Video", img)
 
-            left = np2torch(limg, bgr=True).cuda().unsqueeze(0)
-            right = np2torch(rimg, bgr=True).cuda().unsqueeze(0)
-            pred = self.model(left, right)
-
-            disp = pred["disp"]
-            disp = torch.clip(disp / 192 * 255, 0, 255).long()
-            # disp[disp == 255] = 0
-
-            # vis.histogram(disp.flatten(), win="Hist", opts={"numbins": 25})
-
-            disp = disp.cpu().numpy()[0][0]
-            disp = np.sqrt(disp / 255) * 255
-            disp = disp.astype(np.uint8)
-            disp = cv2.applyColorMap(disp, cv2.COLORMAP_TURBO)
-
-            cv2.imshow("Disp", disp)
-
             key = cv2.waitKey(1)
-            if key == ord("x"):
+            if key == ord("q"):
                 break
 
-            time.sleep(1 / 30)  # 按原帧率播放
+            # time.sleep(1 / 30)  # 按原帧率播放
 
         print("Video End..")
         self.dataloader.Stop()
@@ -79,12 +127,15 @@ class Predict():
         cv2.namedWindow("Video", cv2.WINDOW_KEEPRATIO)
         cv2.namedWindow("Disp", cv2.WINDOW_KEEPRATIO)
 
-        for limg, rimg in self.dataloader:
-            img = np.concatenate((limg, rimg), axis=1)
+        for limgs, rimgs in self.dataloader:
+            
+            img = np.concatenate((limgs[0], rimgs[0]), axis=1)
+            for k in range(1, 6):
+                img = np.concatenate((img, np.concatenate((limgs[k], rimgs[k]), axis=1)), axis=0)
             cv2.imshow("Video", img)
 
             key = cv2.waitKey(1)
-            if key == ord("x"):
+            if key == ord("q"):
                 break
 
             time.sleep(1 / 30)  # 按原帧率播放
@@ -133,16 +184,16 @@ class LoadVideoRos():
 
     def callbackGenerator(self, index, tag):
         def callback(img):
-            self.dataloader.updateSplit(np.array(img), index, tag)
+            self.dataloader.updateSplit(np.frombuffer(img.data, dtype=np.uint8).reshape((img.height, img.width, 3)), index, tag)
         return callback
 
 
 def GetTopic(index, cam_pos):
-    return "/typhoon_h480_{}/stereo_camera/{}/image_raw/image_topics".format(index, cam_pos)
+    return "/typhoon_h480_{}/stereo_camera/{}/image_raw".format(index, cam_pos)
 
 
 class Args:
-    def __init__(self) -> None:
+    def __init__(self) -> None: # HITNet_SF HITNetXL_SF StereoNet HITNet_KITTI
         self.model = "HITNetXL_SF"
 
 
@@ -175,12 +226,27 @@ if __name__ == "xx":
 if __name__ == "__main__":
     dataloader = StreamLoader()
     loader = LoadVideoRos(dataloader)
+    
+    args = Args()
+
+    model = PredictModel(args).eval()
+    
+    # ckpt/hitnet_sf_finalpass.ckpt
+    # ckpt/hitnet_xl_sf_finalpass_from_tf.ckpt
+    # ckpt/stereo_net.ckpt
+    
+    ckpt = torch.load("ckpt/hitnet_xl_sf_finalpass_from_tf.ckpt")
+    if "state_dict" in ckpt:
+        model.load_state_dict(ckpt["state_dict"])
+    else:
+        model.model.load_state_dict(ckpt)
+    model.cuda()
 
     rospy.init_node('Stereo_Matcher', anonymous=True)
     for i in range(6):
         for d in ("left", 'right'):
             rospy.Subscriber(
                 GetTopic(i, d), Image, loader.callbackGenerator(i, d))
-
-    pred = Predict(loader, None)
-    pred.ShowVideo()
+    time.sleep(1)
+    pred = Predict(dataloader, model)
+    pred.run()
