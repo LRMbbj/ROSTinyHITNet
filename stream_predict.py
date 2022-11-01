@@ -45,39 +45,78 @@ class Predict():
         # Thread.__init__(self)
         self.dataloader = dataloader
         self.model = model
+        self.xscale = 6
+        self.yscale = 6
 
     @torch.no_grad()
     def run(self) -> None:
         print("Going to play..")
-        # cv2.namedWindow("Video", cv2.WINDOW_KEEPRATIO)
-        # cv2.namedWindow("Disp", cv2.WINDOW_KEEPRATIO)
+        cv2.namedWindow("Video", cv2.WINDOW_KEEPRATIO)
+        
 
         for limgs, rimgs in self.dataloader:
-            img = np.concatenate((limgs, rimgs), axis=1)
-            # cv2.imshow("Video", img)
+            img = np.concatenate((limgs[0], rimgs[0]), axis=1)
+            limg = limgs[0]
+            rimg = rimgs[0]
+            for k in range(1, 6):
+                img = np.concatenate((img, np.concatenate((limgs[k], rimgs[k]), axis=1)), axis=0)
+                limg = np.concatenate((limg, limgs[k]), axis=0)
+                rimg = np.concatenate((rimg, rimgs[k]), axis=0)
 
-            left = fixdim(limgs).cuda()
-            right = fixdim(rimgs).cuda()
-            pred = self.model(left, right)
+            disps = None
+            t0 = time.time()
+            
+            # leftlist = fixdim(limgs).cuda()
+            # rightlist = fixdim(rimgs).cuda()
+            
+            limg = cv2.resize(limg, None, fx=1/self.xscale, fy=1/self.yscale, interpolation=cv2.INTER_AREA)
+            rimg = cv2.resize(rimg, None, fx=1/self.xscale, fy=1/self.yscale, interpolation=cv2.INTER_AREA)
+            
+            for k in range(1):
+            
+                left = np2torch(limg, bgr=True).cuda().unsqueeze(0)
+                right = np2torch(rimg, bgr=True).cuda().unsqueeze(0)
+                # left = leftlist[k:k+3]
+                # right = rightlist[k:k+3]
+                
+                
+                # torch.cuda.synchronize()
+                t1 = time.time()
+                
+                pred = self.model(left, right)
+                
+                
+                # torch.cuda.synchronize()
+                print("[index:{}] eql fps:{}".format(k, 1./(time.time() - t1)))
+                disp = pred["disp"]
+                disp = torch.clip(disp / 192 * 255, 0, 255).long()
+                # disp[disp == 255] = 0
 
-            disp = pred["disp"]
-            disp = torch.clip(disp / 192 * 255, 0, 255).long()
-            # disp[disp == 255] = 0
+                # vis.histogram(disp.flatten(), win="Hist", opts={"numbins": 25})
+                
+                disp = disp.cpu().numpy()[0][0]
+                disp = np.sqrt(disp / 255) * 255
+                disp = disp.astype(np.uint8)
+                
+                if disps is None:
+                    disps = disp
+                else:
+                    disps = np.concatenate((disps, disp), axis=1)
+                    
+            print("[total] eql fps:{}".format(1./(time.time() - t0)))
 
-            # vis.histogram(disp.flatten(), win="Hist", opts={"numbins": 25})
+            disps = cv2.applyColorMap(disps, cv2.COLORMAP_TURBO)
+            disps = cv2.resize(disps, None, fy=self.yscale, fx=self.xscale, interpolation=cv2.INTER_LINEAR)
+            
+            img = np.concatenate((img, disps), axis=1)
+            
+            cv2.imshow("Video", img)
 
-            disp = disp.cpu().numpy()[0][0]
-            disp = np.sqrt(disp / 255) * 255
-            disp = disp.astype(np.uint8)
-            disp = cv2.applyColorMap(disp, cv2.COLORMAP_TURBO)
+            key = cv2.waitKey(1)
+            if key == ord("q"):
+                break
 
-            # cv2.imshow("Disp", disp)
-
-            # key = cv2.waitKey(1)
-            # if key == ord("x"):
-                # break
-
-            time.sleep(1 / 30)  # 按原帧率播放
+            # time.sleep(1 / 30)  # 按原帧率播放
 
         print("Video End..")
         self.dataloader.Stop()
@@ -96,7 +135,7 @@ class Predict():
             cv2.imshow("Video", img)
 
             key = cv2.waitKey(1)
-            if key == ord("x"):
+            if key == ord("q"):
                 break
 
             time.sleep(1 / 30)  # 按原帧率播放
@@ -154,7 +193,7 @@ def GetTopic(index, cam_pos):
 
 
 class Args:
-    def __init__(self) -> None:
+    def __init__(self) -> None: # HITNet_SF HITNetXL_SF StereoNet HITNet_KITTI
         self.model = "HITNetXL_SF"
 
 
@@ -191,6 +230,11 @@ if __name__ == "__main__":
     args = Args()
 
     model = PredictModel(args).eval()
+    
+    # ckpt/hitnet_sf_finalpass.ckpt
+    # ckpt/hitnet_xl_sf_finalpass_from_tf.ckpt
+    # ckpt/stereo_net.ckpt
+    
     ckpt = torch.load("ckpt/hitnet_xl_sf_finalpass_from_tf.ckpt")
     if "state_dict" in ckpt:
         model.load_state_dict(ckpt["state_dict"])
