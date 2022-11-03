@@ -13,6 +13,7 @@ from models import build_model
 from matplotlib import pyplot as plt
 # import visdom
 import rospy
+from rospy import Header
 from sensor_msgs.msg import Image
 
 
@@ -46,7 +47,29 @@ class Predict():
         self.dataloader = dataloader
         self.model = model
         self.xscale = 6
-        self.yscale = 6
+        self.yscale = 12
+        self.pubs = []
+        for k in range(6):
+            self.pubs.append(rospy.Publisher('Stereo_Matcher/uav_{}/disp'.format(k), Image, queue_size=1))
+        
+    def StereoPub(self, imgs):
+        height = imgs.shape[0]
+        for k in range(6):
+            # cv2.imshow('StereoMatcher/uav_{}/disp'.format(k), imgs[height // 6 * k:height // 6 * (k + 1) - 1, :])
+            img_data = imgs[height // 6 * k:height // 6 * (k + 1) - 1, :]
+            img_pack=Image()
+            header = Header(stamp=rospy.Time.now())
+            header.frame_id = 'map'
+            img_pack.height = height // 6
+            img_pack.width = imgs.shape[1]
+            img_pack.encoding ='mono8'
+            img_pack.data = img_data.tobytes()
+            #print(imgdata)
+            #image_temp.is_bigendian=True
+            img_pack.header = header
+            img_pack.step = imgs.shape[1]
+            self.pubs[k].publish(img_pack)
+        
 
     @torch.no_grad()
     def run(self) -> None:
@@ -87,7 +110,7 @@ class Predict():
                 
                 
                 # torch.cuda.synchronize()
-                print("[index:{}] eql fps:{}".format(k, 1./(time.time() - t1)))
+                # print("[index:{}] eql fps:{}".format(k, 1./(time.time() - t1)))
                 disp = pred["disp"]
                 disp = torch.clip(disp / 192 * 255, 0, 255).long()
                 # disp[disp == 255] = 0
@@ -104,9 +127,11 @@ class Predict():
                     disps = np.concatenate((disps, disp), axis=1)
                     
             print("[total] eql fps:{}".format(1./(time.time() - t0)))
-
-            disps = cv2.applyColorMap(disps, cv2.COLORMAP_TURBO)
+            
+            
             disps = cv2.resize(disps, None, fy=self.yscale, fx=self.xscale, interpolation=cv2.INTER_LINEAR)
+            self.StereoPub(disps)
+            disps = cv2.applyColorMap(disps, cv2.COLORMAP_TURBO)
             
             img = np.concatenate((img, disps), axis=1)
             
